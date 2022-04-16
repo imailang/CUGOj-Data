@@ -1,0 +1,19 @@
+{
+    "SqlUsername": "cugoj",
+    "SqlPassword": "cugoj2022",
+    "SqlIP": "1.15.93.80",
+    "SqlPort": "3306",
+    "Database": "cugoj",
+    "CompileTimeLimit": "10000",
+    "CompileMemoryLimit": "128",
+    "Username": "cugoj",
+    "Password": "cugoj2022",
+    "ContainerName": "runc",
+    "MaxIdleConns": "10",
+    "MaxOpenConns": "1000",
+    "MaxLifeTime": "3600",
+    "QuUser": "cugoj",
+    "QuPassword": "cugoj2022",
+    "QuHost": "1.15.93.80",
+    "QuPort": "5672"
+}

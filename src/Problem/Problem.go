@@ -1,12 +1,15 @@
 package problem
 
 import (
+	filetool "CUGOj-Data/src/FileTool"
 	httptool "CUGOj-Data/src/HttpTool"
 	sqltool "CUGOj-Data/src/SqlTool"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"strconv"
 )
 
 func ChangeProblem(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +42,17 @@ func ChangeProblem(w http.ResponseWriter, r *http.Request) {
 		w.Write(buf)
 		return
 	}
-	result := db.Updates(&problem)
+	result := db.Omit("ID").Updates(&problem.Description)
+	if result.Error != nil {
+		buf, _ = json.Marshal(&httptool.Response{
+			Statu: "021",
+			Info:  result.Error.Error(),
+		})
+		w.Write(buf)
+		return
+	}
+	problem.Description = sqltool.ProblemDescription{}
+	result = db.Omit("description").Omit("d_id").Omit("id").Updates(&problem)
 	if result.Error != nil {
 		buf, _ = json.Marshal(&httptool.Response{
 			Statu: "021",
@@ -49,7 +62,7 @@ func ChangeProblem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result = db.Model(&sqltool.Judge{}).Updates(map[string]interface{}{"PTitle": problem.Title, "PShowID": problem.ShowID})
+	result = db.Model(&sqltool.Judge{}).Where("p_id=?", problem.ID).Updates(map[string]interface{}{"PTitle": problem.Title, "PShowID": problem.ShowID})
 	if result.Error != nil {
 		buf, _ = json.Marshal(&httptool.Response{
 			Statu: "021",
@@ -110,6 +123,9 @@ func AddProblem(w http.ResponseWriter, r *http.Request) {
 		w.Write(buf)
 		return
 	}
+	os.Mkdir(filetool.Home()+"data/problems/"+fmt.Sprint(problem.ID), 0777)
+	os.Mkdir(filetool.Home()+"data/problems/"+fmt.Sprint(problem.ID)+"/files", 0777)
+	os.Mkdir(filetool.Home()+"data/problems/"+fmt.Sprint(problem.ID)+"/cases", 0777)
 	buf, _ = json.Marshal(&httptool.Response{
 		Statu: "000",
 		Info:  fmt.Sprint(problem.ID),
@@ -137,8 +153,13 @@ func GetProblem(w http.ResponseWriter, r *http.Request) {
 		w.Write(buf)
 		return
 	}
+	ID, err := strconv.Atoi(string(buf))
+	if err != nil {
+		w.Write(httptool.ResponseBuf("019", "主键参数应为数字"))
+		return
+	}
 	res := sqltool.Problem{}
-	result := db.Preload("Description").Find(&res, string(buf))
+	result := db.Preload("Description").Omit("CaseFiles").Find(&res, ID)
 	if err = result.Error; err != nil {
 		buf, _ = json.Marshal(&httptool.Response{
 			Statu: "021",
@@ -178,7 +199,6 @@ func GetBaseProblem(w http.ResponseWriter, _ *http.Request) {
 			Output:      "输出描述",
 			Examples:    "[]",
 			Hint:        "提示",
-			CaseFiles:   "",
 		},
 		Source:         "CUG-ACM队",
 		Owner:          0,
@@ -186,6 +206,7 @@ func GetBaseProblem(w http.ResponseWriter, _ *http.Request) {
 		SpjLanguage:    "",
 		CaseVersion:    1,
 		OpenCaseResult: false,
+		CaseFiles:      "[]",
 	}
 	buf, _ := json.Marshal(&res)
 	w.Write(buf)
@@ -200,5 +221,28 @@ func GetProblemCount(w http.ResponseWriter, r *http.Request) {
 }
 
 func DeleteProblem(w http.ResponseWriter, r *http.Request) {
-	httptool.Delete(&sqltool.Problem{}, w, r)
+	defer r.Body.Close()
+	model := sqltool.Problem{}
+	buf, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		w.Write(httptool.ResponseBuf("019", "Http请求读取出错"))
+		return
+	}
+
+	db := httptool.GetDB(w, r)
+	if db == nil {
+		return
+	}
+
+	path := filetool.Home() + "data/problems/" + string(buf)
+
+	result := db.Delete(model, string(buf))
+
+	if !httptool.DisposeQueryResult(w, r, result) {
+		return
+	}
+
+	os.RemoveAll(path)
+
+	w.Write(httptool.SuccessBuf("删除成功"))
 }

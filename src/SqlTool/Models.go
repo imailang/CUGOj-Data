@@ -20,7 +20,6 @@ type ProblemDescription struct {
 	Output      string ``                              //输出描述
 	Examples    string ``                              //题目样例，json格式，[{input: , output: ,descrption:},{input:, output: ,descrption:},...] ，允许有多个样例
 	Hint        string ``                              //题目提示
-	CaseFiles   string ``                              //测试数据文件名
 }
 
 func (m *ProblemDescription) GetID() string {
@@ -42,6 +41,7 @@ type Problem struct {
 	CodeShare      bool                   `gorm:"default:false"`                  //是否允许共享代码
 	SpjLanguage    string                 `gorm:"not null"`                       //Spj的代码语言
 	CaseVersion    uint                   `gorm:"default:1"`                      //测试用例版本，可用于题目重测
+	CaseFiles      string                 ``                                      //测试数据文件名
 	OpenCaseResult bool                   ``                                      //是否公开测试用例
 	SubmitNumber   int                    ``                                      //提交次数
 	SubmitACNumber int                    ``                                      //AC数
@@ -56,28 +56,28 @@ func (m *Problem) GetID() string {
 }
 
 type Judge struct {
-	ID           uint      `gorm:"primaryKey"`     //评测编号
-	Problem      Problem   `gorm:"foreignKey:PID"` //
-	PID          uint      ``                      //题目编号
-	PTitle       string    ``                      //题目标题
-	PShowID      string    ``                      //题目显示ID
-	UserInfo     UserInfo  `gorm:"foreignKey:UID"` //
-	UID          uint      `gorm:"index"`          //用户编号
-	SubmitTime   time.Time `gorm:"autoCreateTime"` //提交时间
-	Status       string    ``                      //评测状态(Pending、Compiling、Running、AC、CE、RE、WA、TLE、MLE、OLE)
-	ShareCode    bool      ``                      //是否共享代码
-	ErrorMessage string    ``                      //错误信息
-	TimeUse      int       ``                      //耗时，单位ms
-	MemoryUse    int       ``                      //使用内存，单位MB
-	Length       int       ``                      //代码长度
-	Code         string    ``                      //代码
-	Language     string    ``                      //语言
-	Judger       string    ``                      //评测机
-	Ip           string    ``                      //用户IP
-	CID          uint      ``                      //比赛ID
-	Version      uint      ``                      //评测版本
-	CreatedAt    time.Time ``                      //创建时间
-	UpdatedAt    time.Time ``                      //修改时间
+	ID           uint      `gorm:"primaryKey"`                       //评测编号
+	Problem      Problem   `gorm:"foreignKey:PID"`                   //
+	PID          uint      ``                                        //题目编号
+	PTitle       string    ``                                        //题目标题
+	PShowID      string    ``                                        //题目显示ID
+	UserInfo     UserInfo  `gorm:"foreignKey:UID"`                   //
+	UID          uint      `gorm:"index:userandtime"`                //用户编号
+	SubmitTime   time.Time `gorm:"autoCreateTime;index:userandtime"` //提交时间
+	Status       string    ``                                        //评测状态(Pending、Compiling、Running、AC、CE、RE、WA、TLE、MLE、OLE)
+	ShareCode    bool      ``                                        //是否共享代码
+	ErrorMessage string    ``                                        //错误信息
+	TimeUse      int       ``                                        //耗时，单位ms
+	MemoryUse    int       ``                                        //使用内存，单位MB
+	Length       int       ``                                        //代码长度
+	Code         string    ``                                        //代码
+	Language     string    ``                                        //语言
+	Judger       string    ``                                        //评测机
+	Ip           string    ``                                        //用户IP
+	CID          uint      ``                                        //比赛ID
+	Version      uint      ``                                        //评测版本
+	CreatedAt    time.Time ``                                        //创建时间
+	UpdatedAt    time.Time ``                                        //修改时间
 }
 
 func (m *Judge) GetID() string {
@@ -119,6 +119,7 @@ type Contest struct {
 	OpenPrint    bool      ``                              //开放打印
 	RankShowName string    ``                              //rank显示名字：username，nikename，realname
 	OpenOutRank  bool      `gorm:"not null;default:true"`  //开放外榜
+	RegisteMode  byte      ``                              //注册模式：0个人;1团队;2综合
 	CreatedAt    time.Time ``                              //创建时间
 	UpdatedAt    time.Time ``                              //修改时间
 }
@@ -153,6 +154,7 @@ type ContestRegister struct {
 	CID       uint      `gorm:"index"`          //比赛ID
 	UserInfo  UserInfo  `gorm:"foreignKey:UID"` //
 	UID       uint      ``                      //用户ID
+	TID       uint      ``                      //注册时的队伍账号，0则为个人参赛
 	CreatedAt time.Time ``                      //创建时间
 	UpdatedAt time.Time ``                      //修改时间
 }
@@ -249,10 +251,72 @@ type UserInfo struct {
 	Title            string    ``                                                     //头衔
 	TitleColor       string    ``                                                     //头衔颜色
 	Status           byte      ``                                                     //状态
+	LastLoginTime    time.Time ``                                                     //
+	LastLoginIP      string    ``                                                     //
 	CreatedAt        time.Time ``                                                     //创建时间
 	UpdatedAt        time.Time ``                                                     //修改时间
 }
 
 func (m *UserInfo) GetID() string {
+	return fmt.Sprint(m.ID)
+}
+
+type PracticeTeam struct {
+	ID    uint   `gorm:"primaryKey"` //编号
+	Title string ``                  //训练队伍标题
+	Grade string ``                  //年级
+}
+
+func (m *PracticeTeam) GetID() string {
+	return fmt.Sprint(m.ID)
+}
+
+type PracticeMember struct {
+	ID           uint         `gorm:"primaryKey"`     //编号
+	Permission   byte         ``                      //权限：0:教练,1:管理员,2:普通成员
+	UID          uint         ``                      //
+	UserInfo     UserInfo     `gorm:"foreignKey:UID"` //用户外键
+	TID          uint         ``                      //
+	PracticeTeam PracticeTeam `gorm:"foreignKey:TID"` //训练组外键
+}
+
+func (m *PracticeMember) GetID() string {
+	return fmt.Sprint(m.ID)
+}
+
+type PracticeContest struct {
+	ID      uint      `gorm:"primaryKey"` //编号
+	Title   string    ``                  //训练标题
+	CID     uint      //比赛编号
+	Contest Contest   `gorm:"foreignKey:CID"` //比赛
+	Data    time.Time ``                      //训练时间
+
+}
+
+func (m *PracticeContest) GetID() string {
+	return fmt.Sprint(m.ID)
+}
+
+type Team struct {
+	ID          uint   `gorm:"primaryKey"` //编号
+	Name        string ``                  //队名
+	Description string ``                  //描述
+
+}
+
+func (m *Team) GetID() string {
+	return fmt.Sprint(m.ID)
+}
+
+type TeamMember struct {
+	ID       uint     `gorm:"primaryKey"`     //编号
+	UID      uint     ``                      //
+	UserInfo UserInfo `gorm:"foreignKey:UID"` //用户外键
+	TID      uint     ``                      //
+	Team     Team     `gorm:"foreignKey:TID"` //队伍外键
+	Leader   bool     ``                      //true：队长
+}
+
+func (m *TeamMember) GetID() string {
 	return fmt.Sprint(m.ID)
 }

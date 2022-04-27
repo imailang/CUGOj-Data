@@ -67,6 +67,7 @@ func InitialSql() error {
 func CreateTables() error {
 	err := db.AutoMigrate(
 		&Problem{},
+		&ProblemDescription{},
 		&Judge{},
 		&JudgeCase{},
 		&Contest{},

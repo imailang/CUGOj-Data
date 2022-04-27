@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/go-chi/chi v1.5.4
+	github.com/go-chi/cors v1.2.0
 	github.com/streadway/amqp v1.0.0
 	gorm.io/driver/mysql v1.3.3
 	gorm.io/gorm v1.23.4

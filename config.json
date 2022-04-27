@@ -15,5 +15,7 @@
     "QuUser": "cugoj",
     "QuPassword": "cugoj2022",
     "QuHost": "1.15.93.80",
-    "QuPort": "5672"
+    "QuPort": "5672",
+    "LoginIP": "1.14.68.184",
+    "LoginPort": "9999"
 }

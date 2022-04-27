@@ -1,12 +1,14 @@
 package httptool
 
 import (
+	properties "CUGOj-Data/src/Properties"
 	sqltool "CUGOj-Data/src/SqlTool"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -16,14 +18,15 @@ type Response struct {
 	Info  string
 }
 
-func UnMarshal(r *http.Request, model any) ([]byte, error) {
+func UnMarshal(w http.ResponseWriter, r *http.Request, model any) bool {
 	buf, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		buf, _ = json.Marshal(&Response{
 			Statu: "019",
 			Info:  err.Error(),
 		})
-		return buf, err
+		w.Write(buf)
+		return false
 	}
 	err = json.Unmarshal(buf, model)
 	if err != nil {
@@ -31,8 +34,10 @@ func UnMarshal(r *http.Request, model any) ([]byte, error) {
 			Statu: "018",
 			Info:  err.Error(),
 		})
+		w.Write(buf)
+		return false
 	}
-	return buf, err
+	return true
 }
 
 type Error struct {
@@ -59,38 +64,41 @@ func DbError() []byte {
 	return buf
 }
 
-func GetDB() (*gorm.DB, error) {
+func GetDB(w http.ResponseWriter, r *http.Request) *gorm.DB {
 	db := sqltool.GetDB()
 	if db == nil {
 		buf, _ := json.Marshal(&Response{
 			Statu: "020",
 			Info:  "数据库链接失效",
 		})
-		return nil, Error{Info: string(buf)}
+		w.Write(buf)
+		return nil
 	}
-	return db, nil
+	return db
 }
 
-func DisposeAddResult(result *gorm.DB) []byte {
+func DisposeAddResult(w http.ResponseWriter, r *http.Request, result *gorm.DB) bool {
 	if result.Error != nil {
 		buf, _ := json.Marshal(&Response{
 			Statu: "021",
 			Info:  result.Error.Error(),
 		})
-		return buf
+		w.Write(buf)
+		return false
 	}
-	return nil
+	return true
 }
 
-func DisposeQueryResult(result *gorm.DB) []byte {
+func DisposeQueryResult(w http.ResponseWriter, r *http.Request, result *gorm.DB) bool {
 	if result.Error != nil {
 		buf, _ := json.Marshal(&Response{
 			Statu: "022",
 			Info:  result.Error.Error(),
 		})
-		return buf
+		w.Write(buf)
+		return false
 	}
-	return nil
+	return true
 }
 
 func SuccessBuf(info string) []byte {
@@ -101,44 +109,41 @@ func SuccessBuf(info string) []byte {
 	return buf
 }
 
-func GetJson(model any, ignores ...string) ([]byte, error) {
+func GetJson(w http.ResponseWriter, r *http.Request, model any, ignores ...string) []byte {
 	buf, err := json.Marshal(model)
 	if err != nil {
-		return buf, err
+		w.Write(ResponseBuf("005", "Json序列化出现问题"))
+		return nil
 	}
 	tmp := make(map[string]interface{})
 	err = json.Unmarshal(buf, &tmp)
 	if err != nil {
-		return buf, nil
+		return buf
 	}
 	for _, key := range ignores {
 		delete(tmp, key)
 	}
 	buf, err = json.Marshal(&tmp)
 	if err != nil {
-		return nil, err
+		w.Write(ResponseBuf("005", "Json序列化出现问题"))
+		return nil
 	}
-	return buf, nil
+	return buf
 }
 
 func Add(model sqltool.SqlModel, w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	buf, err := UnMarshal(r, model)
-	if err != nil {
-		w.Write(buf)
+	if !UnMarshal(w, r, model) {
 		return
 	}
 
-	db, err := GetDB()
-	if err != nil {
-		w.Write(DbError())
+	db := GetDB(w, r)
+	if db == nil {
 		return
 	}
 
 	result := db.Create(model)
-	buf = DisposeAddResult(result)
-	if buf != nil {
-		w.Write(buf)
+	if !DisposeAddResult(w, r, result) {
 		return
 	}
 	w.Write(SuccessBuf(model.GetID()))
@@ -153,20 +158,23 @@ func Query(model any, w http.ResponseWriter, r *http.Request, omi ...string) {
 		return
 	}
 
-	db, err := GetDB()
-	if err != nil {
-		w.Write(DbError())
+	db := GetDB(w, r)
+	if db == nil {
 		return
 	}
 	for _, str := range omi {
 		db = db.Omit(str)
 	}
 
-	result := db.Find(model, string(buf))
+	ID, err := strconv.Atoi(string(buf))
+	if err != nil {
+		w.Write(ResponseBuf("019", "主键参数应为数字"))
+		return
+	}
 
-	buf = DisposeQueryResult(result)
-	if buf != nil {
-		w.Write(buf)
+	result := db.Find(model, ID)
+
+	if !DisposeQueryResult(w, r, result) {
 		return
 	}
 	if result.RowsAffected == 0 {
@@ -174,9 +182,8 @@ func Query(model any, w http.ResponseWriter, r *http.Request, omi ...string) {
 		return
 	}
 
-	buf, err = GetJson(model)
-	if err != nil {
-		w.Write(ResponseBuf("005", "Json序列化出错"))
+	buf = GetJson(w, r, model)
+	if buf == nil {
 		return
 	}
 	w.Write(buf)
@@ -191,40 +198,35 @@ func Delete(model any, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	db, err := GetDB()
-	if err != nil {
-		w.Write(DbError())
+	db := GetDB(w, r)
+	if db == nil {
 		return
 	}
 
 	result := db.Delete(model, string(buf))
 
-	buf = DisposeQueryResult(result)
-	if buf != nil {
-		w.Write(buf)
+	if !DisposeQueryResult(w, r, result) {
 		return
 	}
 	w.Write(SuccessBuf("删除成功"))
 }
 
-func Change(model any, w http.ResponseWriter, r *http.Request) {
+func Change(model any, w http.ResponseWriter, r *http.Request, omi ...string) {
 	defer r.Body.Close()
-	buf, err := UnMarshal(r, model)
-	if err != nil {
-		w.Write(buf)
+	if !UnMarshal(w, r, model) {
 		return
 	}
 
-	db, err := GetDB()
-	if err != nil {
-		w.Write(DbError())
+	db := GetDB(w, r)
+	if db == nil {
 		return
 	}
 
+	for _, str := range omi {
+		db = db.Omit(str)
+	}
 	result := db.Updates(model)
-	buf = DisposeAddResult(result)
-	if buf != nil {
-		w.Write(buf)
+	if !DisposeAddResult(w, r, result) {
 		return
 	}
 	w.Write(SuccessBuf("修改成功"))
@@ -232,9 +234,8 @@ func Change(model any, w http.ResponseWriter, r *http.Request) {
 
 func Base(model any, w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	buf, err := GetJson(model)
-	if err != nil {
-		w.Write(ResponseBuf("005", "序列化出现错误"))
+	buf := GetJson(w, r, model)
+	if buf == nil {
 		return
 	}
 	w.Write(buf)
@@ -245,15 +246,13 @@ func Count(model any, w http.ResponseWriter, r *http.Request) {
 
 	odds := make(map[string]interface{})
 
-	buf, err := UnMarshal(r, &odds)
-	if err != nil {
-		w.Write(buf)
+	if !UnMarshal(w, r, &odds) {
 		return
 	}
 
 	db := sqltool.GetDB()
 	if db == nil {
-		buf, _ = json.Marshal(&Response{
+		buf, _ := json.Marshal(&Response{
 			Statu: "020",
 			Info:  "数据库链接失效",
 		})
@@ -262,9 +261,14 @@ func Count(model any, w http.ResponseWriter, r *http.Request) {
 	}
 
 	db = db.Model(model)
-
+	oddCnt := 0
 	for _, odd := range odds {
-		db = db.Where(odd)
+		if oddCnt == 0 {
+			db = db.Where(SetWhere(odd, db))
+		} else {
+			db = db.Or(SetWhere(odd, db))
+		}
+		oddCnt++
 		if db.Error != nil {
 			w.Write(ResponseBuf("022", db.Error.Error()))
 			return
@@ -275,7 +279,7 @@ func Count(model any, w http.ResponseWriter, r *http.Request) {
 
 	result := db.Count(&cnt)
 	if result.Error != nil {
-		buf, _ = json.Marshal(&Response{
+		buf, _ := json.Marshal(&Response{
 			Statu: "021",
 			Info:  result.Error.Error(),
 		})
@@ -285,6 +289,26 @@ func Count(model any, w http.ResponseWriter, r *http.Request) {
 	w.Write(SuccessBuf(fmt.Sprint(cnt)))
 }
 
+func SetWhere(odd interface{}, db *gorm.DB) *gorm.DB {
+	switch odd.(type) {
+	case map[string]interface{}:
+
+	default:
+		return db
+	}
+	for k, v := range odd.(map[string]interface{}) {
+		key := strings.TrimSpace(k)
+		if k == "order" {
+			db = db.Order(v)
+		} else if strings.HasSuffix(key, "?") {
+			db = db.Where(k, v)
+		} else {
+			db = db.Where(k+" = ?", v)
+		}
+	}
+	return db
+}
+
 func List(model any, w http.ResponseWriter, r *http.Request, omi ...string) {
 	defer r.Body.Close()
 
@@ -292,15 +316,13 @@ func List(model any, w http.ResponseWriter, r *http.Request, omi ...string) {
 
 	odds := make(map[string]interface{})
 
-	buf, err := UnMarshal(r, &odds)
-	if err != nil {
-		w.Write(buf)
+	if !UnMarshal(w, r, &odds) {
 		return
 	}
 
 	db := sqltool.GetDB()
 	if db == nil {
-		buf, _ = json.Marshal(&Response{
+		buf, _ := json.Marshal(&Response{
 			Statu: "020",
 			Info:  "数据库链接失效",
 		})
@@ -314,9 +336,9 @@ func List(model any, w http.ResponseWriter, r *http.Request, omi ...string) {
 			continue
 		}
 		if oddCnt == 0 {
-			db = db.Where(odd)
+			db = db.Where(SetWhere(odd, db))
 		} else {
-			db = db.Or(odd)
+			db = db.Or(SetWhere(odd, db))
 		}
 		if db.Error != nil {
 			w.Write(ResponseBuf("022", db.Error.Error()))
@@ -357,14 +379,14 @@ func List(model any, w http.ResponseWriter, r *http.Request, omi ...string) {
 
 	result := db.Find(model)
 	if result.Error != nil {
-		buf, _ = json.Marshal(&Response{
+		buf, _ := json.Marshal(&Response{
 			Statu: "021",
 			Info:  result.Error.Error(),
 		})
 		w.Write(buf)
 		return
 	}
-	buf, err = json.Marshal(model)
+	buf, err := json.Marshal(model)
 	if err != nil {
 		buf, _ = json.Marshal(&Response{
 			Statu: "005",
@@ -374,4 +396,176 @@ func List(model any, w http.ResponseWriter, r *http.Request, omi ...string) {
 		return
 	}
 	w.Write(SuccessBuf(string(buf)))
+}
+
+func GetIDFromTokenNotWrite(r *http.Request) uint {
+	token, err := r.Cookie("cugtoken")
+	if err != nil {
+		return 0
+	}
+	cugtoken := token.String()
+	if !strings.HasPrefix(cugtoken, "cugtoken=") {
+		return 0
+	}
+	cugtoken = cugtoken[9:]
+	ip, err := properties.Get("LoginIP")
+	if err != nil {
+		return 0
+	}
+	port, err := properties.Get("LoginPort")
+	if err != nil {
+		return 0
+	}
+
+	res, err := http.Post("http://"+ip+":"+port+"/ojLogin/userInfo/getLoginIdByToken", "application/json", strings.NewReader("{\"cugtoken\":\""+cugtoken+"\"}"))
+	if err != nil {
+		return 0
+	}
+	buf, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return 0
+	}
+	resModel := make(map[string]interface{})
+
+	err = json.Unmarshal(buf, &resModel)
+	if err != nil {
+		return 0
+	}
+
+	IDStr, ok := resModel["data"]
+	if !ok || IDStr == nil {
+		return 0
+	}
+	ID, err := strconv.Atoi(IDStr.(string))
+	if err != nil {
+		return 0
+	}
+	// if fmt.Sprint(ID) != readID {
+	// 	w.Write(ResponseBuf("032", "非法用户"))
+	// 	return 0
+	// }
+	return uint(ID)
+}
+
+func GetIDFromToken(w http.ResponseWriter, r *http.Request) uint {
+	// buf, err := ioutil.ReadAll(r.Body)
+	// if err != nil {
+	// 	w.Write(ResponseBuf("019", "Http请求出错"))
+	// 	return 0
+	// }
+	// readID := string(buf)
+	token, err := r.Cookie("cugtoken")
+	if err != nil {
+		w.Write(ResponseBuf("032", "非法用户"))
+		return 0
+	}
+	cugtoken := token.String()
+	if !strings.HasPrefix(cugtoken, "cugtoken=") {
+		w.Write(ResponseBuf("032", "非法用户"))
+		return 0
+	}
+	cugtoken = cugtoken[9:]
+	ip, err := properties.Get("LoginIP")
+	if err != nil {
+		w.Write(ResponseBuf("030", "配置文件中不存在LoginIP"))
+		return 0
+	}
+	port, err := properties.Get("LoginPort")
+	if err != nil {
+		w.Write(ResponseBuf("030", "配置文件中不存在LoginPort"))
+		return 0
+	}
+
+	res, err := http.Post("http://"+ip+":"+port+"/ojLogin/userInfo/getLoginIdByToken", "application/json", strings.NewReader("{\"cugtoken\":\""+cugtoken+"\"}"))
+	if err != nil {
+		w.Write(ResponseBuf("031", "远程调用失败"))
+		return 0
+	}
+	buf, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		w.Write(ResponseBuf("031", "远程调用失败"))
+		return 0
+	}
+	resModel := make(map[string]interface{})
+
+	err = json.Unmarshal(buf, &resModel)
+	if err != nil {
+		w.Write(ResponseBuf("018", "Json反序列化出错"))
+		return 0
+	}
+
+	IDStr, ok := resModel["data"]
+	if !ok || IDStr == nil {
+		w.Write(ResponseBuf("031", "远程调用失败"))
+		return 0
+	}
+	ID, err := strconv.Atoi(IDStr.(string))
+	if err != nil {
+		w.Write(ResponseBuf("031", "远程调用失败"))
+		return 0
+	}
+	// if fmt.Sprint(ID) != readID {
+	// 	w.Write(ResponseBuf("032", "非法用户"))
+	// 	return 0
+	// }
+	return uint(ID)
+}
+
+func SetPageQuery(w http.ResponseWriter, r *http.Request, odds map[string]interface{}, db *gorm.DB) (*gorm.DB, bool) {
+	qu, ok := odds["pagequery"]
+	if ok {
+		qump := qu.(map[string]interface{})
+		offset, ok := qump["offset"]
+		if !ok {
+			w.Write(ResponseBuf("019", "pagequery缺少offset字段"))
+			return nil, true
+		}
+		pagesize, ok := qump["pagesize"]
+		if !ok {
+			w.Write(ResponseBuf("019", "pagequery缺少pagesize字段"))
+			return nil, true
+		}
+		off, err := strconv.Atoi(fmt.Sprint(offset))
+		if err != nil {
+			w.Write(ResponseBuf("019", err.Error()))
+			return nil, true
+		}
+		siz, err := strconv.Atoi(fmt.Sprint(pagesize))
+		if err != nil {
+			w.Write(ResponseBuf("019", err.Error()))
+			return nil, true
+		}
+		db = db.Offset(off * siz).Limit(siz)
+		return db, true
+	}
+	return db, false
+}
+func SetOrder(w http.ResponseWriter, r *http.Request, odds map[string]interface{}, db *gorm.DB) (*gorm.DB, bool) {
+	qu, ok := odds["order"]
+	if ok {
+		switch qu.(type) {
+		case string:
+			db = db.Order(qu)
+		default:
+			w.Write(ResponseBuf("019", "order字段不是合法字符串"))
+			return nil, true
+		}
+		return db, true
+	}
+	return db, false
+}
+
+func GetParam[V any](w http.ResponseWriter, r *http.Request, params map[string]interface{}, key string, param *V) bool {
+	res, ok := params[key]
+	if !ok {
+		w.Write(ResponseBuf("019", "请求缺少："+key+"字段"))
+		return false
+	}
+	val, ok := res.(V)
+	if !ok {
+		w.Write(ResponseBuf("019", key+"字段格式错误"))
+		return false
+	}
+	(*param) = val
+	return true
 }

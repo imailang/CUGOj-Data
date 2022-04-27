@@ -17,24 +17,18 @@ import (
 func AddJudge(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	res := sqltool.Judge{}
-	buf, err := httptool.UnMarshal(r, &res)
-	if err != nil {
-		w.Write(buf)
+	if !httptool.UnMarshal(w, r, &res) {
 		return
 	}
 	res.SubmitTime = time.Now()
 	res.Status = "Pending"
-	db, err := httptool.GetDB()
-	if err != nil {
-		w.Write([]byte(err.Error()))
+	db := httptool.GetDB(w, r)
+	if db == nil {
 		return
 	}
-
 	problem := sqltool.Problem{}
 	result := db.Find(&problem, res.PID)
-	buf = httptool.DisposeQueryResult(result)
-	if buf != nil {
-		w.Write(buf)
+	if !httptool.DisposeQueryResult(w, r, result) {
 		return
 	}
 	res.PShowID = problem.ShowID
@@ -42,15 +36,13 @@ func AddJudge(w http.ResponseWriter, r *http.Request) {
 	res.Length = len(res.Code)
 
 	result = db.Create(&res)
-	buf = httptool.DisposeAddResult(result)
-	if buf != nil {
-		w.Write(buf)
+	if !httptool.DisposeAddResult(w, r, result) {
 		return
 	}
 
-	err = queuetool.NewWork("judge", fmt.Sprint(res.ID))
+	err := queuetool.NewWork("judge", fmt.Sprint(res.ID))
 	if err != nil {
-		buf, _ = json.Marshal(httptool.Response{
+		buf, _ := json.Marshal(httptool.Response{
 			Statu: "023",
 			Info:  "评测队列发布出错",
 		})
@@ -58,14 +50,17 @@ func AddJudge(w http.ResponseWriter, r *http.Request) {
 		db.Delete(&res)
 		return
 	}
-	w.Write(httptool.SuccessBuf("提交成功"))
+	w.Write(httptool.SuccessBuf(res.GetID()))
 }
 
 func GetBaseJudge(w http.ResponseWriter, _ *http.Request) {
 	res := sqltool.Judge{
 		Status: "Pending",
 	}
-	buf, _ := httptool.GetJson(&res, "Problem", "UserInfo")
+	buf := httptool.GetJson(w, nil, &res, "Problem", "UserInfo")
+	if buf == nil {
+		return
+	}
 	w.Write(buf)
 }
 
@@ -76,9 +71,8 @@ func GetJudge(w http.ResponseWriter, r *http.Request) {
 		w.Write(httptool.ResponseBuf("019", "Http请求读取出错"))
 		return
 	}
-	db, err := httptool.GetDB()
-	if err != nil {
-		w.Write(httptool.DbError())
+	db := httptool.GetDB(w, r)
+	if db == nil {
 		return
 	}
 	res := sqltool.Judge{}
@@ -92,10 +86,9 @@ func GetJudge(w http.ResponseWriter, r *http.Request) {
 		w.Write(httptool.ResponseBuf("022", "查询的数据不存在"))
 		return
 	}
-	buf, err = httptool.GetJson(&res, "Problem")
+	buf = httptool.GetJson(w, r, &res, "Problem")
 
-	if err != nil {
-		w.Write(httptool.ResponseBuf("005", "Json序列化错误"))
+	if buf == nil {
 		return
 	}
 	w.Write(httptool.SuccessBuf(string(buf)))
@@ -113,10 +106,9 @@ func GetJudgeFull(w http.ResponseWriter, r *http.Request) {
 		w.Write(httptool.ResponseBuf("022", "数据库查询失败:"+err.Error()))
 		return
 	}
-	buf, err = httptool.GetJson(&res, "Problem")
+	buf = httptool.GetJson(w, r, &res, "Problem")
 
-	if err != nil {
-		w.Write(httptool.ResponseBuf("005", "Json序列化错误"))
+	if buf == nil {
 		return
 	}
 	w.Write(httptool.SuccessBuf(string(buf)))
@@ -134,9 +126,8 @@ func GetJudgeCases(w http.ResponseWriter, r *http.Request) {
 		w.Write(httptool.ResponseBuf("022", "数据库查询出错"))
 		return
 	}
-	buf, err = httptool.GetJson(&res, "Judge", "JID")
-	if err != nil {
-		w.Write(httptool.ResponseBuf("005", "Json序列化发生问题"))
+	buf = httptool.GetJson(w, r, &res, "Judge", "JID")
+	if buf == nil {
 		return
 	}
 	w.Write(httptool.SuccessBuf(string(buf)))
@@ -151,15 +142,13 @@ func GetJudgeList(w http.ResponseWriter, r *http.Request) {
 
 	odds := make(map[string]interface{})
 
-	buf, err := httptool.UnMarshal(r, &odds)
-	if err != nil {
-		w.Write(buf)
+	if !httptool.UnMarshal(w, r, &odds) {
 		return
 	}
 
 	db := sqltool.GetDB()
 	if db == nil {
-		buf, _ = json.Marshal(&httptool.Response{
+		buf, _ := json.Marshal(&httptool.Response{
 			Statu: "020",
 			Info:  "数据库链接失效",
 		})
@@ -215,16 +204,16 @@ func GetJudgeList(w http.ResponseWriter, r *http.Request) {
 	db = db.Preload("UserInfo", func(_db *gorm.DB) *gorm.DB {
 		return _db.Select("ID", "Nickname", "Username", "Realname")
 	})
-	result := db.Omit("Code").Find(&model)
+	result := db.Order("submit_time desc").Omit("Code").Find(&model)
 	if result.Error != nil {
-		buf, _ = json.Marshal(&httptool.Response{
+		buf, _ := json.Marshal(&httptool.Response{
 			Statu: "021",
 			Info:  result.Error.Error(),
 		})
 		w.Write(buf)
 		return
 	}
-	buf, err = json.Marshal(&model)
+	buf, err := json.Marshal(&model)
 	if err != nil {
 		buf, _ = json.Marshal(&httptool.Response{
 			Statu: "005",
